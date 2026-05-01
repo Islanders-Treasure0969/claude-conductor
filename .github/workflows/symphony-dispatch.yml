@@ -1,0 +1,134 @@
+# =============================================================================
+# Symphony Dispatch (核心ワークフロー)
+# -----------------------------------------------------------------------------
+# 用途:
+#   GitHub Issue に `claude-task` ラベルが付いたタイミングで Claude Code
+#   エージェントを自動起動し、Issue 駆動で実装〜PR 作成まで自走させる。
+#
+# ステートマシン:
+#   [claude-task] → [claude-in-progress] → [claude-review] / [claude-failed]
+#
+# セキュリティ要点 (公式ドキュメント準拠):
+#   - Issue title/body は env: 経由でのみ参照 (prompt injection / コマンド
+#     インジェクション対策)
+#   - permissions は最小権限のみ宣言
+#   - --allowedTools で Claude が触れるツールを明示的に絞る
+#   - GITHUB_TOKEN (短命) を利用、PAT は使わない
+# =============================================================================
+name: Symphony Dispatch
+
+on:
+  issues:
+    types: [labeled]
+
+# 最小権限の原則
+permissions:
+  contents: write        # コード変更・ブランチ作成
+  issues: write          # ラベル更新・コメント追加
+  pull-requests: write   # PR 作成
+  id-token: write        # OIDC token exchange (GitHub App 認証)
+
+jobs:
+  dispatch:
+    # claude-task ラベルが付いたときのみ起動 (他ラベルは無視)
+    if: github.event.label.name == 'claude-task'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      # -----------------------------------------------------------------------
+      # Step 1: ラベルを in-progress に遷移し、開始コメントを投稿
+      # -----------------------------------------------------------------------
+      - name: Mark as in-progress
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue edit "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --remove-label "claude-task" \
+            --add-label "claude-in-progress"
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "$(printf '🤖 Claude Code エージェントが作業を開始しました。\n\nGHA 実行ログ: %s' "$RUN_URL")"
+
+      # -----------------------------------------------------------------------
+      # Step 2: リポジトリのチェックアウト (フル履歴 = ブランチ作成のため)
+      # -----------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # -----------------------------------------------------------------------
+      # Step 3: Claude Code Action 実行
+      # -----------------------------------------------------------------------
+      # 【重要】Issue title / body は必ず env: で受け取り、prompt 内では
+      #         ${{ env.* }} で参照する。run: ブロックで直接展開すると
+      #         コマンドインジェクションのリスクがある。
+      # -----------------------------------------------------------------------
+      - name: Run Claude Code Agent
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY:  ${{ github.event.issue.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            あなたは Issue 駆動の自律コーディングエージェントです。
+            以下の Issue を分析し、実装・修正を行い、PR を作成してください。
+
+            ## Issue 情報
+            番号: ${{ env.ISSUE_NUMBER }}
+            タイトル: ${{ env.ISSUE_TITLE }}
+            内容:
+            ${{ env.ISSUE_BODY }}
+
+            ## 作業ルール
+            1. 作業前にまずリポジトリ全体のコードを調査・理解すること
+            2. テストが存在する場合は必ず実行し、パスを確認すること
+            3. ブランチ名は `claude/issue-${{ env.ISSUE_NUMBER }}` とすること
+            4. PR 作成時に Issue を close するリンクを含めること ("Closes #N")
+            5. 不明点があれば Issue にコメントして作業を停止すること (推測で進めない)
+            6. 完了後、この Issue に作業サマリ (変更内容・テスト結果) をコメントすること
+
+          claude_args: |
+            --max-turns 30
+            --model claude-sonnet-4-6
+            --allowedTools "Edit,Read,Write,Bash,Glob,Grep,mcp__github__create_pull_request,mcp__github__create_branch,mcp__github__list_issues,mcp__github__get_issue"
+          additional_permissions: "actions: read"
+
+      # -----------------------------------------------------------------------
+      # Step 4: 成功時 → review ラベルへ遷移
+      # -----------------------------------------------------------------------
+      - name: Mark as review (on success)
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          gh issue edit "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --remove-label "claude-in-progress" \
+            --add-label "claude-review"
+
+      # -----------------------------------------------------------------------
+      # Step 5: 失敗時 → failed ラベルへ遷移し、人間にエスカレーション
+      # -----------------------------------------------------------------------
+      - name: Mark as failed (on failure)
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue edit "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --remove-label "claude-in-progress" \
+            --add-label "claude-failed"
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "$(printf '⚠️ エージェントの実行が失敗しました。\n\nGHA 実行ログ: %s\n\n人間による確認が必要です。' "$RUN_URL")"

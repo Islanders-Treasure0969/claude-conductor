@@ -1,0 +1,47 @@
+# =============================================================================
+# Symphony Interactive (@claude メンション対応)
+# -----------------------------------------------------------------------------
+# 用途:
+#   Issue / PR コメントに @claude が含まれた際にエージェントを呼び出して
+#   対話的な質問・追加修正に応じる補助ワークフロー。
+#   dispatch.yml が「自走」、interactive.yml が「対話」を担当する。
+#
+# セキュリティ要点:
+#   - claude-code-action のデフォルト動作で、リポジトリへの write 権限を
+#     持つユーザーからのコメントのみがトリガーされる (公開 PR からの
+#     悪意あるトリガーを防止)
+#   - trigger_phrase 未指定 = デフォルト @claude
+# =============================================================================
+name: Symphony Interactive
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  claude-respond:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Claude Code Agent (interactive)
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # trigger_phrase を省略 → デフォルト @claude が有効
+          # write 権限ユーザーのみトリガー可 (セキュリティデフォルト維持)
+          claude_args: |
+            --max-turns 20
+            --model claude-sonnet-4-6

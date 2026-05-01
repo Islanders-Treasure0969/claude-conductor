@@ -1,0 +1,62 @@
+# =============================================================================
+# Symphony Cleanup (停滞 Issue のタイムアウト処理)
+# -----------------------------------------------------------------------------
+# 用途:
+#   `claude-in-progress` のまま長時間更新されていない Issue を検出し、
+#   `claude-failed` に遷移させて人間にエスカレーションする。
+#   GHA そのもののクラッシュ・runner 障害などで遷移漏れした Issue を
+#   定期的に回収するセーフティネット。
+#
+# 動作:
+#   - 毎時 cron 実行 + workflow_dispatch (手動) でも実行可能
+#   - STALL_HOURS で指定した時間 (デフォルト 2h) を超えて
+#     `claude-in-progress` のまま動きがない Issue を failed に遷移
+# =============================================================================
+name: Symphony Cleanup
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # 毎時 0 分に実行
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  cleanup-stalled:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Detect and handle stalled issues
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          STALL_HOURS: "2"  # 2 時間以上停滞 → failed
+        run: |
+          set -euo pipefail
+          STALL_SECONDS=$((STALL_HOURS * 3600))
+          NOW=$(date -u +%s)
+
+          gh issue list \
+            --repo "$REPO" \
+            --label "claude-in-progress" \
+            --json number,updatedAt \
+            --limit 100 \
+          | jq -r '.[] | "\(.number) \(.updatedAt)"' \
+          | while read -r number updated_at; do
+              # GNU date / BSD date 両対応
+              updated_epoch=$(date -d "$updated_at" +%s 2>/dev/null || \
+                              date -j -f "%Y-%m-%dT%H:%M:%SZ" "$updated_at" +%s)
+              elapsed=$((NOW - updated_epoch))
+
+              if [ "$elapsed" -gt "$STALL_SECONDS" ]; then
+                echo "Issue #$number が ${STALL_HOURS} 時間以上停滞 → failed に遷移"
+                gh issue edit "$number" \
+                  --repo "$REPO" \
+                  --remove-label "claude-in-progress" \
+                  --add-label "claude-failed"
+                gh issue comment "$number" \
+                  --repo "$REPO" \
+                  --body "$(printf '⏰ タイムアウト: エージェントが %s 時間以上応答していません。\n\nGHA のログを確認してください。' "$STALL_HOURS")"
+              fi
+            done
