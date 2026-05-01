@@ -63,7 +63,6 @@ OpenAI Symphony 相当のエージェントオーケストレーションを **C
 
 ## 参照リソース
 
-- 元設計資料: `/Users/iwashita/Downloads/symphony-claude-code-gha-design.md`
 - claude-code-action 公式: https://github.com/anthropics/claude-code-action
 - claude-code-action Security Docs: https://github.com/anthropics/claude-code-action/blob/main/docs/security.md
 - OpenAI Symphony: https://github.com/openai/symphony

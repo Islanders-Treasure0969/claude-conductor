@@ -104,4 +104,4 @@ actionlint .github/workflows/*.yml
 
 ## 元設計資料
 
-`/Users/iwashita/Downloads/symphony-claude-code-gha-design.md` ベース。
+OpenAI Symphony の公式仕様および `anthropics/claude-code-action` 公式ドキュメントを基に、社内向けに設計を起こしたもの。設計ドキュメント本体はリポジトリ外で管理。
