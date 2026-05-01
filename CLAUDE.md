@@ -1,52 +1,69 @@
-# プロジェクトコンテキスト (Claude Code 共通ルール)
+# symphony-claude-gha — 開発ルール
 
-<!--
-このファイルは Claude Code エージェント (ローカル実行・GitHub Actions 経由実行とも)
-が常に参照する共通コンテキストです。
-プロジェクト固有のルールはここに集約してください。
--->
+## このリポジトリについて
 
-## プロジェクト概要
+OpenAI Symphony 相当のエージェントオーケストレーションを **Claude Code + GitHub Actions + GitHub Issues** で再現するための **scaffolding (雛形)** リポジトリ。
 
-<!-- リポジトリの目的・技術スタック・主要なドメインを 3〜5 行で記述 -->
-TODO: プロジェクト固有の概要をここに記述
+このリポジトリ自体は業務ロジックを持たず、`.github/workflows/` と `templates/CLAUDE.md` を社内プロジェクトへ配布することが目的。
 
 ## ディレクトリ構成
 
-<!-- 主要ディレクトリの役割。エージェントがコードベースを把握する手がかりになる -->
-TODO: 主要ディレクトリと役割を記述
+```
+.
+├── .github/
+│   ├── workflows/
+│   │   ├── symphony-dispatch.yml      # Issue ラベル検知 → エージェント起動 (核心)
+│   │   ├── symphony-interactive.yml   # @claude メンション対応
+│   │   └── symphony-cleanup.yml       # 停滞 Issue のタイムアウト処理
+│   └── ISSUE_TEMPLATE/
+│       └── claude-task.md             # 作業依頼テンプレート
+├── templates/
+│   └── CLAUDE.md                      # 導入先リポジトリ用 CLAUDE.md テンプレート
+├── CLAUDE.md                          # ← このファイル (本リポジトリ用)
+├── README.md                          # セットアップ手順・セキュリティ要点
+└── .gitignore
+```
 
 ## 開発ルール
 
 ### ブランチ戦略
-- `main` ブランチへの直接 push は禁止
-- Issue 駆動の自走作業は `claude/issue-{N}` ブランチを使用
-- それ以外は `feature/`, `fix/`, `chore/` プレフィックスを使用
-
-### テスト
-- PR は必ずテストをパスさせてから作成すること
-- テストコマンド: TODO (例: `npm test` / `pytest` / `dbt test` 等)
+- `main` への直接 push は禁止
+- 機能追加/修正は `feature/` `fix/` `chore/` `docs/` プレフィックスを使用
+- workflow の変更は実 GHA で動作確認するまで PR を merge しない
 
 ### コミットメッセージ
-- Conventional Commits に従う (`feat:` / `fix:` / `docs:` / `chore:` ...)
+- Conventional Commits (`feat:` / `fix:` / `docs:` / `chore:` / `refactor:`)
 
-### 禁止事項
-- シークレット・API キーをコードに直書きしない
-- 本番データベースへの直接アクセスをしない
-- 他のエージェントのワークスペース (別ブランチ) を変更しない
+### workflow 編集時のチェック
+- YAML 構文検証:
+  ```bash
+  python3 -c "import yaml,glob; [yaml.safe_load(open(p)) for p in glob.glob('.github/workflows/*.yml')]" \
+    && echo OK
+  ```
+- (推奨) actionlint インストール後:
+  ```bash
+  actionlint .github/workflows/*.yml
+  ```
+
+### セキュリティ要件 (workflow 変更時に必ず確認)
+- Issue title/body 等のユーザー制御値は **必ず `env:` 経由**で `prompt` に渡す (run ブロックへの直接展開禁止)
+- `permissions:` は最小権限のみ宣言
+- `--allowedTools` でエージェントが触れるツールを明示的に制限
+- `ANTHROPIC_API_KEY` は GitHub Secrets のみ。コードに直書きしない
+- `GITHUB_TOKEN` を使用 (PAT は使わない)
+
+### テンプレート編集時の注意
+- `templates/CLAUDE.md` は導入先で `TODO:` を埋める前提のテンプレート。
+  `TODO:` プレースホルダは消さないこと。
 
 ## 不明点の扱い
 
-実装中に判断できないことがあれば、**推測で進めず Issue にコメントして停止すること**。
-- 仕様の解釈に複数の妥当な選択肢がある
-- 既存実装との整合が取れない
-- 完了条件が満たせるかが事前に判断できない
+実装中に判断できない仕様があれば、**推測で進めず Issue にコメントして停止する**。
+特に workflow のセキュリティ関連 (権限・トークン・トリガー条件) は独断で変更しない。
 
-これらに該当する場合は、判断材料を整理して Issue にコメントし、人間の判断を待つ。
+## 参照リソース
 
-## エージェント運用ルール (Symphony 連携)
-
-- Issue ラベル `claude-task` の付与でこのリポジトリの `.github/workflows/symphony-dispatch.yml` が起動する
-- ラベル遷移: `claude-task` → `claude-in-progress` → `claude-review` / `claude-failed`
-- `@claude` メンションで `.github/workflows/symphony-interactive.yml` 経由の対話的応答が可能
-- `claude-in-progress` のまま 2 時間以上更新がない Issue は cleanup ワークフローで `claude-failed` に遷移する
+- 元設計資料: `/Users/iwashita/Downloads/symphony-claude-code-gha-design.md`
+- claude-code-action 公式: https://github.com/anthropics/claude-code-action
+- claude-code-action Security Docs: https://github.com/anthropics/claude-code-action/blob/main/docs/security.md
+- OpenAI Symphony: https://github.com/openai/symphony

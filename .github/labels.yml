@@ -1,0 +1,25 @@
+# =============================================================================
+# Symphony ステートマシン用ラベル定義
+# -----------------------------------------------------------------------------
+# 用途:
+#   このファイルは Symphony ワークフローが利用する 4 つのラベルを宣言する。
+#   `scripts/setup-labels.sh` で一括作成・同期できる。
+#
+# 色は GitHub の慣例的なステータスカラーに準拠:
+#   claude-task         → 青  (キュー / new)
+#   claude-in-progress  → 黄  (進行中 / warn 寄り)
+#   claude-review       → 緑  (準備完了 / success 寄り)
+#   claude-failed       → 赤  (失敗 / danger)
+# =============================================================================
+- name: claude-task
+  color: "1f77b4"
+  description: "作業キュー: Claude Code エージェントの起動を要求"
+- name: claude-in-progress
+  color: "fbca04"
+  description: "実行中: エージェントが作業中 (cleanup の対象)"
+- name: claude-review
+  color: "2ea043"
+  description: "PR 作成済み・人間レビュー待ち"
+- name: claude-failed
+  color: "d73a4a"
+  description: "失敗 / タイムアウト: 人間による介入が必要"
