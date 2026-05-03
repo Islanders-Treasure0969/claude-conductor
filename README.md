@@ -78,27 +78,26 @@ Issue opened
 
 ### C. インストールスクリプト (既存リポ向け)
 
-> **Note**: `install.sh` は **Phase 2 の PR で追加予定**です。それまでは
-> 以下の手動コピー手順をお使いください。
+既存の git リポジトリのルートで以下を実行:
 
 ```bash
-# (Phase 2 以降)
-curl -fsSL https://raw.githubusercontent.com/Islanders-Treasure0969/claude-conductor/main/install.sh \
-  | bash
+curl -fsSL https://raw.githubusercontent.com/Islanders-Treasure0969/claude-conductor/main/install.sh | bash
 ```
 
-#### 暫定: 手動コピー
+オプション (環境変数で挙動を変更):
+
+| 変数 | デフォルト | 用途 |
+|---|---|---|
+| `SYMPHONY_REF` | `main` | 取得するブランチ・タグ・commit hash |
+| `SYMPHONY_REPO` | `Islanders-Treasure0969/claude-conductor` | フォークから取得する場合 |
+| `SYMPHONY_TARGET` | `.` | インストール先ディレクトリ |
+| `SYMPHONY_FORCE` | `0` | 既存ファイルを上書き (`1` で有効、自動で `.bak` を作成) |
+
+例: 特定タグから取得・既存ファイルを上書き:
 
 ```bash
-git clone https://github.com/Islanders-Treasure0969/claude-conductor.git /tmp/claude-conductor
-cd /path/to/your-existing-repo
-
-cp -r /tmp/claude-conductor/.github/workflows .github/
-cp -r /tmp/claude-conductor/.github/ISSUE_TEMPLATE .github/
-cp /tmp/claude-conductor/.github/labels.yml .github/
-cp -r /tmp/claude-conductor/docs/adr docs/
-cp -r /tmp/claude-conductor/scripts .
-cp /tmp/claude-conductor/templates/CLAUDE.md ./CLAUDE.md
+SYMPHONY_REF=v0.1.0 SYMPHONY_FORCE=1 \
+  bash <(curl -fsSL https://raw.githubusercontent.com/Islanders-Treasure0969/claude-conductor/main/install.sh)
 ```
 
 ---
@@ -173,6 +172,9 @@ gh auth login
 | `templates/CLAUDE.md` | **導入先リポジトリ**用 CLAUDE.md テンプレート |
 | `CLAUDE.md` | **本リポジトリ自身**の開発ルール |
 | `DESIGN.md` | アーキテクチャ設計資料 |
+| `SECURITY.md` | セキュリティポリシー・脆弱性報告先 |
+| `CONTRIBUTING.md` | 貢献ガイド |
+| `install.sh` | 既存リポへの後付けインストーラ (C モデル) |
 
 ---
 
@@ -185,7 +187,7 @@ gh auth login
 - `GITHUB_TOKEN` (短命) のみ利用、PAT は使わない
 - `@claude` メンションは write 権限ユーザーのみトリガー可 (claude-code-action のデフォルト動作)
 
-詳細なセキュリティ方針は **Phase 2 の `SECURITY.md`** で公開予定です。
+詳細なセキュリティ方針・脆弱性報告先は [SECURITY.md](SECURITY.md) を参照。
 
 ---
 
