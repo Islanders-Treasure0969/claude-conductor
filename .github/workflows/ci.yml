@@ -1,0 +1,168 @@
+# =============================================================================
+# CI: workflow と設定ファイルの品質検証
+# -----------------------------------------------------------------------------
+# 用途:
+#   PR と main への push で、以下を自動検証する。
+#     - YAML 構文 (全 .yml ファイル)
+#     - GitHub Actions 固有の検証 (actionlint)
+#     - shell script の構文 (shellcheck)
+#     - .github/labels.yml の構造
+#
+# 設計方針:
+#   - OSS として信頼を担保するため、全 PR で workflow の品質を機械検証する
+#   - permissions は contents: read のみ (検証は副作用を持たない)
+# =============================================================================
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  yaml-syntax:
+    name: YAML syntax check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate YAML syntax
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob
+          import sys
+          import yaml
+
+          errors = []
+          patterns = [
+              '.github/workflows/*.yml',
+              '.github/workflows/*.yaml',
+              '.github/labels.yml',
+              '.github/dependabot.yml',
+          ]
+          files = sorted({f for p in patterns for f in glob.glob(p)})
+
+          for path in files:
+              try:
+                  with open(path) as f:
+                      yaml.safe_load(f)
+                  print(f"✓ {path}")
+              except yaml.YAMLError as e:
+                  print(f"✗ {path}: {e}", file=sys.stderr)
+                  errors.append(path)
+
+          if errors:
+              sys.exit(f"YAML syntax errors in: {errors}")
+          PY
+
+  actionlint:
+    name: actionlint (GitHub Actions linter)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      # actionlint 公式の reviewdog アクションは PR コメントを残すが、
+      # ここでは PR コメント不要なので raw bash で実行する
+      #
+      # SC2016 (Expressions don't expand in single quotes) は jq/awk/sed の
+      # フィルタ式を含む箇所で誤検知が頻発するため、全 workflow に対して
+      # 無効化する。シングルクォートは意図的に使用されている。
+      - name: Run actionlint
+        run: |
+          set -euo pipefail
+          curl -sSfL \
+            https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash \
+            | bash
+          ./actionlint -color \
+            -shellcheck "shellcheck -e SC2016" \
+            .github/workflows/*.yml
+
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run shellcheck
+        run: |
+          set -euo pipefail
+          # OSS リポジトリ全体の .sh ファイルをチェック
+          mapfile -t scripts < <(find scripts -type f -name '*.sh' 2>/dev/null)
+          if [ -f install.sh ]; then
+            scripts+=("install.sh")
+          fi
+
+          if [ "${#scripts[@]}" -eq 0 ]; then
+            echo "No shell scripts found, skipping."
+            exit 0
+          fi
+
+          echo "Checking: ${scripts[*]}"
+          shellcheck "${scripts[@]}"
+
+  labels-schema:
+    name: labels.yml schema check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate labels.yml shape
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re
+          import sys
+          import yaml
+
+          with open('.github/labels.yml') as f:
+              labels = yaml.safe_load(f)
+
+          if not isinstance(labels, list):
+              sys.exit("labels.yml must be a YAML list at top level")
+
+          required = {'name', 'color', 'description'}
+          color_re = re.compile(r'^[0-9a-fA-F]{6}$')
+          names = set()
+          errors = []
+
+          for i, label in enumerate(labels):
+              if not isinstance(label, dict):
+                  errors.append(f"[{i}] entry must be a mapping")
+                  continue
+              missing = required - set(label.keys())
+              if missing:
+                  errors.append(f"[{i}] missing keys: {missing}")
+              name = label.get('name')
+              if name in names:
+                  errors.append(f"[{i}] duplicate name: {name}")
+              names.add(name)
+              color = str(label.get('color', ''))
+              if not color_re.match(color):
+                  errors.append(f"[{i}/{name}] invalid color (need 6-hex, got {color!r})")
+
+          if errors:
+              for e in errors:
+                  print(f"✗ {e}", file=sys.stderr)
+              sys.exit(1)
+
+          print(f"✓ {len(labels)} labels validated")
+          PY
