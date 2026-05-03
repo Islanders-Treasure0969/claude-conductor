@@ -1,90 +1,204 @@
-# symphony-claude-gha
+# claude-conductor
 
-OpenAI Symphony 相当のエージェントオーケストレーションを **Claude Code + GitHub Actions + GitHub Issues** で再現するための雛形リポジトリ。
+> **Drop-in Symphony for Claude Code.**
+> [OpenAI Symphony](https://github.com/openai/symphony) 相当のエージェント
+> オーケストレーションを **Claude Code + GitHub Actions + GitHub Issues** で再現する。
 
-## コンセプト
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-- **Issue = 作業単位** — Issue ラベルがステートマシン
-- **コントロールプレーン = GitHub** — Linear / Symphony デーモンの代替
-- **エージェント = Claude Code (`claude-code-action@v1`)** — Codex の代替
-- **ワークスペース = GHA runner** — Per-issue 独立チェックアウト
+GitHub Issues をコントロールプレーンとして、Issue が opened された瞬間から
+**Triage → 実装 / 調査 → ADR → 実装チケット分解** までを自動化します。
 
-## ステートマシン
+---
+
+## 目次
+
+- [何ができるのか](#何ができるのか)
+- [アーキテクチャ](#アーキテクチャ)
+- [導入方法](#導入方法)
+- [ファイル構成](#ファイル構成)
+- [セキュリティ](#セキュリティ)
+- [既知の制約](#既知の制約)
+- [ローカル検証](#ローカル検証)
+- [ライセンス](#ライセンス)
+
+---
+
+## 何ができるのか
+
+| あなたがやること | システムが自動でやること |
+|---|---|
+| Issue を立てる | LLM が内容を分析して 3 ルートに振り分け (Triage) |
+| `claude-task` ラベル付与 | エージェントが調査・実装・テスト・PR 作成 |
+| `investigation` ラベル付与 | エージェントが調査して ADR draft PR を作成 |
+| ADR PR を approve & merge | ADR の「実装チケットへの分解」をパースして子 Issue を自動生成 |
+| `@claude` でメンション | 対話的に追加修正・質問対応 |
+| (放置) | 2 時間以上停滞した Issue は `claude-failed` に自動遷移 |
+
+## アーキテクチャ
 
 ```
-[claude-task] ──(GHA labeled イベント)──▶ [claude-in-progress]
-                                              │
-                                  成功 ──┬───▶ [claude-review]   PR 作成済み
-                                          │
-                              失敗/停滞 ──┴───▶ [claude-failed]   人間介入
+Issue opened
+   │
+   ▼
+[symphony-triage.yml]   LLM が 3 ルートに自動振り分け
+   │
+   ├─ triage-A → 人間が claude-task ラベル付与
+   │             [symphony-dispatch.yml] → 実装 PR 作成 → 1 approve → merge
+   │
+   ├─ triage-B → 人間が investigation ラベル付与
+   │             [symphony-investigate.yml] → ADR draft PR 作成
+   │             → 人間が ADR を編集・approve・merge
+   │             [symphony-decompose.yml]  → 実装チケット自動生成
+   │             (Route A → claude-task 付与 → 実装パイプラインへ)
+   │             (Route C → triage-C 付与 → 人間対応キューへ)
+   │
+   └─ triage-C → 人間がアサイン・対応 (エージェントは関与しない)
+
+[symphony-interactive.yml] @claude メンションで対話モード (任意のタイミング)
+[symphony-cleanup.yml]     停滞 Issue を毎時クリーンアップ
 ```
+
+詳細は [DESIGN.md](DESIGN.md) を参照。
+
+---
+
+## 導入方法
+
+導入形態は **2 つ**から選べます。新規リポジトリは A、既存リポジトリは C を推奨。
+
+### A. GitHub Template Repository (新規リポ向け / 推奨)
+
+1. このリポジトリの **「Use this template」** ボタンをクリック
+2. 自分の Organization / アカウント配下に新リポジトリを作成
+3. [初期セットアップ](#初期セットアップ) に進む
+
+> **Note**: テンプレートとして公開する側で、リポジトリ Settings → General →
+> "Template repository" を有効化してください。
+
+### C. インストールスクリプト (既存リポ向け)
+
+> **Note**: `install.sh` は **Phase 2 の PR で追加予定**です。それまでは
+> 以下の手動コピー手順をお使いください。
+
+```bash
+# (Phase 2 以降)
+curl -fsSL https://raw.githubusercontent.com/Islanders-Treasure0969/claude-conductor/main/install.sh \
+  | bash
+```
+
+#### 暫定: 手動コピー
+
+```bash
+git clone https://github.com/Islanders-Treasure0969/claude-conductor.git /tmp/claude-conductor
+cd /path/to/your-existing-repo
+
+cp -r /tmp/claude-conductor/.github/workflows .github/
+cp -r /tmp/claude-conductor/.github/ISSUE_TEMPLATE .github/
+cp /tmp/claude-conductor/.github/labels.yml .github/
+cp -r /tmp/claude-conductor/docs/adr docs/
+cp -r /tmp/claude-conductor/scripts .
+cp /tmp/claude-conductor/templates/CLAUDE.md ./CLAUDE.md
+```
+
+---
+
+## 初期セットアップ
+
+導入形態 A / C どちらの場合も、以下の **3 ステップ** を行ってください。
+
+### 1. `CLAUDE.md` の `TODO:` を埋める
+
+リポジトリ直下の `CLAUDE.md` に `TODO:` プレースホルダがあります。これがエージェントの
+判断軸になるため、必ず埋めてください。
+
+- プロジェクト概要 (技術スタック・主要ドメイン)
+- ディレクトリ構成
+- テストコマンド (例: `npm test` / `pytest` / `dbt test`)
+
+### 2. GitHub Secret を設定
+
+GitHub リポジトリの Settings → Secrets and variables → Actions で:
+
+- `ANTHROPIC_API_KEY` を追加 ([API Key 取得](https://console.anthropic.com/))
+
+### 3. ラベルを作成
+
+```bash
+# 要件: gh CLI (auth 済み) + yq v4+
+brew install gh yq
+gh auth login
+
+./scripts/setup-labels.sh                    # カレントリポ
+./scripts/setup-labels.sh owner/your-repo    # 明示指定
+```
+
+10 個のラベルが作成されます (`triage-pending` / `triage-A` / `triage-B` / `triage-C` /
+`claude-task` / `claude-in-progress` / `claude-review` / `claude-failed` /
+`investigation` / `adr-draft`)。
+
+### 4. (推奨) Branch Protection ルール
+
+`main` ブランチに以下を設定することを強く推奨します:
+
+- Require a pull request before merging
+- **Require approvals: 1** (エージェント PR も含めて全 PR に 1 approve 必須)
+- Require status checks to pass before merging
+
+### 動作確認
+
+1. `🔧 実装依頼 (Route A)` テンプレートで Issue を作成
+2. Actions タブで `Symphony Triage` が起動することを確認
+3. Triage 結果コメントが Issue に投稿される (Route A/B/C のいずれか)
+4. Route A なら `claude-task` ラベルを付与 → `Symphony Dispatch` が起動
+5. 成功すれば `claude-review` ラベル + PR 作成、失敗すれば `claude-failed`
+
+---
 
 ## ファイル構成
 
 | パス | 役割 |
 |---|---|
-| `.github/workflows/symphony-dispatch.yml` | Issue ラベル検知 → エージェント起動 (核心) |
-| `.github/workflows/symphony-interactive.yml` | `@claude` メンション対応 |
-| `.github/workflows/symphony-cleanup.yml` | 停滞 Issue のタイムアウト処理 (毎時 cron) |
-| `.github/ISSUE_TEMPLATE/claude-task.md` | Issue テンプレート (Claude への作業依頼書) |
+| `.github/workflows/symphony-triage.yml` | ① Issue opened → 3 ルート自動振り分け |
+| `.github/workflows/symphony-dispatch.yml` | ② `claude-task` → 実装エージェント |
+| `.github/workflows/symphony-investigate.yml` | ③ `investigation` → 調査エージェント (ADR draft) |
+| `.github/workflows/symphony-decompose.yml` | ④ ADR merge → 実装チケット自動生成 |
+| `.github/workflows/symphony-interactive.yml` | ⑤ `@claude` メンション対応 |
+| `.github/workflows/symphony-cleanup.yml` | ⑥ 停滞 Issue のタイムアウト処理 (毎時 cron) |
+| `.github/ISSUE_TEMPLATE/claude-task.md` | Route A (実装依頼) 用 Issue テンプレート |
+| `.github/ISSUE_TEMPLATE/investigation.md` | Route B (調査・設計依頼) 用 Issue テンプレート |
 | `.github/labels.yml` | Symphony ステートマシン用ラベル定義 |
+| `docs/adr/ADR-000-template.md` | ADR テンプレート (decompose のパース対象) |
 | `scripts/setup-labels.sh` | ラベル一括作成・同期スクリプト |
 | `templates/CLAUDE.md` | **導入先リポジトリ**用 CLAUDE.md テンプレート |
 | `CLAUDE.md` | **本リポジトリ自身**の開発ルール |
+| `DESIGN.md` | アーキテクチャ設計資料 |
 
-## 導入手順 (社内プロジェクトへの適用)
-
-### 1. ファイルを導入先リポジトリへコピー
-
-```bash
-cp -r .github/ /path/to/your-repo/
-cp templates/CLAUDE.md /path/to/your-repo/CLAUDE.md
-```
-
-### 2. 導入先の `CLAUDE.md` を埋める
-
-`TODO:` プレースホルダ(プロジェクト概要・ディレクトリ構成・テストコマンド)を、自分のプロジェクトに合わせて記述する。これが空だとエージェントの判断軸が無い。
-
-### 3. リポジトリ secrets を設定
-
-- `ANTHROPIC_API_KEY` を Settings → Secrets and variables → Actions に追加
-
-### 4. ラベルを作成
-
-`scripts/setup-labels.sh` を実行 (要 `gh` + `yq`):
-
-```bash
-./scripts/setup-labels.sh owner/your-repo
-```
-
-または手動で 4 つのラベルを作成:
-- `claude-task` (作業キュー)
-- `claude-in-progress` (実行中)
-- `claude-review` (PR レビュー待ち)
-- `claude-failed` (失敗・人間介入)
-
-### 5. 動作確認
-
-1. `Claude Task` テンプレートで Issue を作成
-2. `claude-task` ラベルを付与
-3. Actions タブで `Symphony Dispatch` が起動することを確認
-4. 成功すれば `claude-review` ラベルに遷移 + PR 作成
-5. 失敗すれば `claude-failed` ラベルに遷移 + Issue に GHA ログリンク
+---
 
 ## セキュリティ
 
 - Issue title / body は `env:` 経由で `prompt` に渡す (コマンドインジェクション対策)
-- `--allowedTools` で Claude が利用できるツールを最小限に制限
-- `permissions:` は必要最小限のみ宣言
+- `--allowedTools` で Claude が利用できるツールを明示的に最小限に制限
+- `permissions:` は各 workflow で必要最小限のみ宣言
+- `ANTHROPIC_API_KEY` は GitHub Secrets のみ。コード直書き禁止
 - `GITHUB_TOKEN` (短命) のみ利用、PAT は使わない
-- `@claude` メンションは write 権限ユーザーのみトリガー可 (デフォルト動作維持)
+- `@claude` メンションは write 権限ユーザーのみトリガー可 (claude-code-action のデフォルト動作)
+
+詳細なセキュリティ方針は **Phase 2 の `SECURITY.md`** で公開予定です。
+
+---
 
 ## 既知の制約
 
-- `github-actions` ユーザーのコメントは後続 GHA をトリガーしない (無限ループ防止の GitHub 仕様)
+- `github-actions` ユーザーのコメント・コミットは後続 GHA をトリガーしない (無限ループ防止の GitHub 仕様)
+- ただし `gh issue create` + ラベル付与は別アクター扱いとなり、`claude-task` 付与で `symphony-dispatch.yml` が正常にトリガーされる
 - 1 つの Issue に複数回 `claude-task` を付けると複数エージェントが起動する (べき等性は別途対応が必要)
 - `--max-turns 30` 超過時はエージェントが途中停止して Issue にコメントを残す
-- GHA `timeout-minutes` は `symphony-dispatch.yml` で 60 分に設定済 (調整可)
+- GHA タイムアウトは各 workflow で個別設定 (`symphony-dispatch.yml` / `symphony-investigate.yml` は 60 分、`symphony-triage.yml` は 15 分)
+- `symphony-decompose.yml` は ADR の markdown フォーマットに強く依存。`docs/adr/ADR-000-template.md` の見出し構造を変更する場合は workflow も合わせて修正
+
+---
 
 ## ローカル検証
 
@@ -102,6 +216,20 @@ brew install actionlint
 actionlint .github/workflows/*.yml
 ```
 
-## 元設計資料
+---
 
-OpenAI Symphony の公式仕様および `anthropics/claude-code-action` 公式ドキュメントを基に、社内向けに設計を起こしたもの。設計ドキュメント本体はリポジトリ外で管理。
+## ライセンス
+
+Apache License 2.0. 詳細は [LICENSE](LICENSE) を参照。
+
+OpenAI Symphony と同じライセンスを採用しています。
+
+---
+
+## 関連リソース
+
+| リソース | URL |
+|---|---|
+| OpenAI Symphony | https://github.com/openai/symphony |
+| anthropics/claude-code-action | https://github.com/anthropics/claude-code-action |
+| Claude Code GitHub Actions ドキュメント | https://docs.anthropic.com/ja/docs/claude-code/github-actions |
