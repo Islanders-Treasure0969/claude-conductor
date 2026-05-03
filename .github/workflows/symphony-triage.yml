@@ -1,0 +1,205 @@
+# =============================================================================
+# Symphony Triage (Issue 自動振り分け)
+# -----------------------------------------------------------------------------
+# 用途:
+#   Issue が opened されたとき、LLM で内容を分析して 3 ルートに自動振り分けする。
+#     - Route A (即実装可能)        → triage-A
+#     - Route B (調査・設計先行)    → triage-B
+#     - Route C (人間主体)          → triage-C
+#
+# 次のアクション:
+#   triage-A → 人間が claude-task ラベル付与で symphony-dispatch.yml が起動
+#   triage-B → 人間が investigation ラベル付与で symphony-investigate.yml が起動
+#   triage-C → 人間がアサイン・対応 (エージェントは関与しない)
+#
+# セキュリティ:
+#   Issue title/body は env: 経由で prompt に渡す (run ブロックへの直接展開禁止)
+# =============================================================================
+name: Symphony Triage
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      # -----------------------------------------------------------------------
+      # Step 1: triage-pending ラベルを即時付与 (処理中であることを示す)
+      # -----------------------------------------------------------------------
+      - name: Mark as triage-pending
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          gh issue edit "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --add-label "triage-pending"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # Step 2: Triage エージェント実行
+      # コードベースを参照しながら Issue の性質を判定する
+      # -----------------------------------------------------------------------
+      - name: Run Triage Agent
+        id: triage
+        uses: anthropics/claude-code-action@v1
+        env:
+          ISSUE_TITLE:  ${{ github.event.issue.title }}
+          ISSUE_BODY:   ${{ github.event.issue.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            あなたは Issue の性質を分析する Triage エージェントです。
+            以下の Issue を分析し、必ずいずれか 1 つのルートを判定してください。
+
+            ## Issue 情報
+            番号: ${{ env.ISSUE_NUMBER }}
+            タイトル: ${{ env.ISSUE_TITLE }}
+            内容:
+            ${{ env.ISSUE_BODY }}
+
+            ## 事前調査
+            判定前に以下を確認すること:
+            - CLAUDE.md を読んでプロジェクトのコンテキストを把握する
+            - 関連しそうなコードを Glob/Grep で確認する
+            - docs/adr/ に既存の ADR があれば参照する
+
+            ## 判定基準
+
+            **Route A (即実装)**: 以下を全て満たす場合
+            - 「何を作るか・直すか」が明確に記述されている
+            - 影響範囲が単一コンポーネント内で完結している
+            - 設計の判断や調査なしに実装を開始できる
+            - バグ修正の場合は再現手順が明記されている
+
+            **Route B (調査・設計先行)**: 以下のいずれかに該当する場合
+            - 解決策が未定で調査が必要
+            - アーキテクチャ上の判断が伴う
+            - ADR を書いてから実装する必要がある
+            - 複数の実装チケットに分解されることが予想される
+
+            **Route C (人間主体)**: 以下のいずれかに該当する場合
+            - 複数チームや複数サービスにまたがる変更
+            - セキュリティ・認証・権限設計の変更
+            - 要件そのものが未定義・議論が必要
+            - リスクが高くエージェントへの委譲が不適切
+
+            ## 出力 (必ず最後に実行すること)
+
+            判定が終わったら、結果を **`/tmp/triage-result.json`** に
+            以下の正確な JSON 形式で書き出してから完了すること:
+
+            ```json
+            {
+              "route": "A",
+              "reason": "判定理由を 1〜2 文で",
+              "confidence": "high",
+              "note": "人間へのコメント (不要なら空文字列)"
+            }
+            ```
+
+            - `route` は "A" / "B" / "C" のいずれか
+            - `confidence` は "high" / "medium" / "low" のいずれか
+            - 余計な前置きや後置きは出力しない
+            - ファイル書き込み後、`cat /tmp/triage-result.json` で内容を確認すること
+
+          claude_args: |
+            --max-turns 10
+            --model claude-sonnet-4-6
+            --allowedTools "Read,Write,Glob,Grep,Bash(cat:*)"
+
+      # -----------------------------------------------------------------------
+      # Step 3: 判定結果を解析してラベル付与・コメント投稿
+      # -----------------------------------------------------------------------
+      - name: Apply triage label and comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+
+          RESULT_FILE=/tmp/triage-result.json
+          ROUTE=""
+          REASON=""
+          CONFIDENCE=""
+          NOTE=""
+
+          if [ -s "$RESULT_FILE" ] && jq empty "$RESULT_FILE" >/dev/null 2>&1; then
+            ROUTE=$(jq -r '.route // ""' "$RESULT_FILE")
+            REASON=$(jq -r '.reason // ""' "$RESULT_FILE")
+            CONFIDENCE=$(jq -r '.confidence // ""' "$RESULT_FILE")
+            NOTE=$(jq -r '.note // ""' "$RESULT_FILE")
+          else
+            echo "::warning::triage agent did not produce a valid $RESULT_FILE"
+          fi
+
+          case "$ROUTE" in
+            A)
+              LABEL="triage-A"
+              EMOJI="🔧"
+              NEXT='`claude-task` ラベルを付与すると実装エージェントが自動起動します。'
+              ;;
+            B)
+              LABEL="triage-B"
+              EMOJI="🔍"
+              NEXT='`investigation` ラベルを付与すると調査エージェントが自動起動します。'
+              ;;
+            C)
+              LABEL="triage-C"
+              EMOJI="👤"
+              NEXT="このIssueは人間が主体で対応してください。エージェントは起動しません。"
+              ;;
+            *)
+              LABEL="triage-C"
+              EMOJI="⚠️"
+              NEXT="判定に失敗しました。手動でラベルを設定してください。"
+              ROUTE="?"
+              ;;
+          esac
+
+          gh issue edit "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --remove-label "triage-pending" \
+            --add-label "$LABEL"
+
+          # 改行を含むコメント本文は printf で実改行を生成 (シェルリテラルの \n は使わない)
+          NOTE_BLOCK=""
+          if [ -n "${NOTE:-}" ]; then
+            NOTE_BLOCK=$(printf '\n**補足**: %s\n' "$NOTE")
+          fi
+
+          BODY=$(printf '%s **Triage結果: Route %s** (確信度: %s)\n\n**判定理由**: %s\n%s\n**次のステップ**: %s\n\n> 判定に異議がある場合はラベルを手動で変更してください。' \
+            "$EMOJI" "$ROUTE" "${CONFIDENCE:-unknown}" "${REASON:-(理由が出力されませんでした)}" "$NOTE_BLOCK" "$NEXT")
+
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "$BODY"
+
+      # -----------------------------------------------------------------------
+      # Step 4: 失敗時の処理
+      # -----------------------------------------------------------------------
+      - name: Handle triage failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue edit "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --remove-label "triage-pending" \
+            --add-label "triage-C" || true
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "$(printf '⚠️ Triage エージェントの実行が失敗しました。手動でラベルを設定してください。\n\nGHA 実行ログ: %s' "$RUN_URL")"

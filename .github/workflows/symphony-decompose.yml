@@ -1,0 +1,168 @@
+# =============================================================================
+# Symphony Decompose (ADR → 実装チケット自動生成)
+# -----------------------------------------------------------------------------
+# 用途:
+#   ADR の PR が main に merge されたとき、ADR ファイルの「実装チケットへの分解」
+#   セクションをパースして GitHub Issue を自動生成する。
+#     - Route A のチケット: triage-A + claude-task ラベル付与 → 実装パイプラインへ
+#     - Route C のチケット: triage-C ラベルのみ → 人間対応キューへ
+#
+# 前提:
+#   - ADR ファイルが docs/adr/ADR-NNN-*.md のパスに存在すること
+#   - ADR 内の「実装チケットへの分解」セクションが以下の形式に従っていること
+#       - [ ] {タスクタイトル} <!-- Route A -->
+#       - [ ] {タスクタイトル} <!-- Route C: {理由} -->
+#   - ADR に "Closes #{Issue番号}" が含まれていること (親 Issue へのリンク)
+#
+# 注意:
+#   - github-actions ユーザーのコメント・コミットは後続 GHA をトリガーしない
+#     (GitHub の無限ループ防止仕様)。
+#     しかし issue create + label 付与は API 経由で別アクターになるため、
+#     claude-task ラベル付与で symphony-dispatch.yml が正常にトリガーされる。
+# =============================================================================
+name: Symphony Decompose
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  decompose:
+    # adr/ ブランチからの PR が merge されたときのみ起動
+    if: |
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'adr/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # merge 後の main を取得するために fetch-depth: 2 が必要
+          fetch-depth: 2
+
+      # -----------------------------------------------------------------------
+      # Step 1: ADR ファイルを特定して実装チケットを自動生成
+      # サブシェルでのカウンタ消失を避けるため、メインループは
+      # process substitution (`< <(...)`) で読み込む。
+      # -----------------------------------------------------------------------
+      - name: Extract tasks and create implementation tickets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER:    ${{ github.event.pull_request.number }}
+          REPO:         ${{ github.repository }}
+          SERVER_URL:   ${{ github.server_url }}
+        run: |
+          set -euo pipefail
+
+          # merge された ADR ファイルを特定
+          ADR_FILE=$(git diff --name-only HEAD~1 HEAD \
+            | grep -E '^docs/adr/ADR-[0-9]+.*\.md$' \
+            | grep -v 'ADR-000-template.md' \
+            | head -1 || true)
+
+          if [ -z "$ADR_FILE" ]; then
+            echo "::warning::ADR ファイルが見つかりません。スキップします。"
+            exit 0
+          fi
+
+          echo "対象 ADR: $ADR_FILE"
+
+          ADR_NUMBER=$(echo "$ADR_FILE" | grep -oE 'ADR-[0-9]+' | grep -oE '[0-9]+')
+
+          # 親 Issue 番号を "Closes #N" の形式から取得
+          PARENT_ISSUE=$(grep -E '^Closes #[0-9]+' "$ADR_FILE" \
+            | grep -oE '#[0-9]+' | head -1 | tr -d '#' || true)
+
+          if [ -z "$PARENT_ISSUE" ]; then
+            echo "::warning::親 Issue 番号 (Closes #N) が見つかりません。サマリコメントは投稿しません。"
+          fi
+
+          # 「実装チケットへの分解」セクションを抽出
+          # 該当セクション内の `- [ ]` 行のみ対象とする
+          TASKS_FILE=$(mktemp)
+          awk '/^## 実装チケットへの分解/{flag=1; next} /^## /{flag=0} flag' "$ADR_FILE" \
+            | grep -E '^\- \[ \]' > "$TASKS_FILE" || true
+
+          if [ ! -s "$TASKS_FILE" ]; then
+            echo "::warning::実装チケットが定義されていません。スキップします。"
+            rm -f "$TASKS_FILE"
+            exit 0
+          fi
+
+          ROUTE_A_COUNT=0
+          ROUTE_C_COUNT=0
+
+          # process substitution でメインシェルに変数を反映させる
+          while IFS= read -r task; do
+            # タイトル抽出 (`- [ ] ` を除去し、HTML コメントを除去)
+            TITLE=$(echo "$task" | sed -E 's/^- \[ \] //' | sed -E 's/[[:space:]]*<!--.*-->//' | xargs)
+
+            # ルート判定 (デフォルト Route A)
+            ROUTE=$(echo "$task" | grep -oE 'Route [AC]' | awk '{print $2}' | head -1 || true)
+            ROUTE=${ROUTE:-A}
+
+            # Route C の理由を抽出
+            ROUTE_C_REASON=""
+            if [ "$ROUTE" = "C" ]; then
+              ROUTE_C_REASON=$(echo "$task" | sed -E 's/.*Route C:[[:space:]]*([^>]*).*/\1/' | xargs || true)
+            fi
+
+            # Issue 本文を生成
+            BODY=$(printf '## 概要\n\nこのタスクは ADR-%s の承認を受けて自動生成されました。\n\n- **親 Issue**: %s\n- **ADR**: [ADR-%s](%s/%s/blob/main/%s)\n- **元の PR**: #%s\n\n## 作業内容\n\nADR の「実装チケットへの分解」セクションを参照してください。\nADR 内の「決定」セクションに基づいて実装を進めてください。\n\n## 完了条件\n\n- [ ] 実装完了\n- [ ] テストパス\n- [ ] レビュー承認 (1 approve 必須)' \
+              "$ADR_NUMBER" \
+              "${PARENT_ISSUE:+#$PARENT_ISSUE}" \
+              "$ADR_NUMBER" "$SERVER_URL" "$REPO" "$ADR_FILE" \
+              "$PR_NUMBER")
+
+            if [ "$ROUTE" = "A" ]; then
+              LABELS="triage-A"
+            else
+              LABELS="triage-C"
+              if [ -n "$ROUTE_C_REASON" ]; then
+                BODY=$(printf '%s\n\n## Route C の理由\n\n%s' "$BODY" "$ROUTE_C_REASON")
+              fi
+            fi
+
+            # Issue 作成
+            ISSUE_URL=$(gh issue create \
+              --repo "$REPO" \
+              --title "$TITLE" \
+              --body "$BODY" \
+              --label "$LABELS")
+
+            ISSUE_NUMBER=$(echo "$ISSUE_URL" | grep -oE '[0-9]+$')
+            echo "Issue #${ISSUE_NUMBER} を作成: $TITLE (Route $ROUTE)"
+
+            # Route A のみ claude-task ラベルを付与 (実装パイプラインへ投入)
+            if [ "$ROUTE" = "A" ]; then
+              sleep 3  # ラベル付与の競合を避ける
+              gh issue edit "$ISSUE_NUMBER" \
+                --repo "$REPO" \
+                --add-label "claude-task"
+              echo "  → claude-task ラベル付与 (symphony-dispatch.yml がトリガーされます)"
+              ROUTE_A_COUNT=$((ROUTE_A_COUNT + 1))
+            else
+              echo "  → Route C: 人間対応キューに追加"
+              ROUTE_C_COUNT=$((ROUTE_C_COUNT + 1))
+            fi
+          done < "$TASKS_FILE"
+
+          rm -f "$TASKS_FILE"
+
+          echo "生成サマリ: Route A = ${ROUTE_A_COUNT}, Route C = ${ROUTE_C_COUNT}"
+
+          # 親 Issue にサマリコメントを投稿
+          if [ -n "$PARENT_ISSUE" ]; then
+            SUMMARY=$(printf '✅ ADR-%s が承認されました。実装チケットを自動生成しました。\n\n- 🔧 Route A (エージェント実装): %d 件 (`claude-task` ラベル付与済み)\n- 👤 Route C (人間対応): %d 件 (`triage-C` ラベル付与済み)\n\n生成されたチケットは `triage-A` または `triage-C` ラベルで検索できます。' \
+              "$ADR_NUMBER" "$ROUTE_A_COUNT" "$ROUTE_C_COUNT")
+
+            gh issue comment "$PARENT_ISSUE" \
+              --repo "$REPO" \
+              --body "$SUMMARY"
+          fi

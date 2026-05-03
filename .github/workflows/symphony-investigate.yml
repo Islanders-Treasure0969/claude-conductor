@@ -1,0 +1,171 @@
+# =============================================================================
+# Symphony Investigate (調査・設計エージェント)
+# -----------------------------------------------------------------------------
+# 用途:
+#   investigation ラベルが付与されたとき、調査エージェントを起動して
+#   ADR draft を PR として作成する (Route B の第1フェーズ)。
+#
+# ステートマシン:
+#   investigation → claude-in-progress → adr-draft (PR 作成済み)
+#                                      → claude-failed (失敗)
+#
+# ADR フォーマット:
+#   docs/adr/ADR-NNN-{kebab-case-title}.md
+#   symphony-decompose.yml がこのファイルをパースするため、フォーマット厳守。
+#
+# 次のアクション:
+#   人間が ADR PR をレビューし、「実装チケットへの分解」セクションを編集して
+#   approve & merge → symphony-decompose.yml が実装チケットを自動生成。
+#
+# セキュリティ:
+#   Issue title/body は env: 経由で prompt に渡す (run ブロックへの直接展開禁止)
+# =============================================================================
+name: Symphony Investigate
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write       # ADR ファイル作成・ブランチ作成
+  issues: write         # ラベル更新・コメント追加
+  pull-requests: write  # PR 作成
+  id-token: write       # OIDC token exchange
+
+jobs:
+  investigate:
+    if: github.event.label.name == 'investigation'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      # -----------------------------------------------------------------------
+      # Step 1: ラベルを in-progress に遷移し、開始コメントを投稿
+      # -----------------------------------------------------------------------
+      - name: Mark as in-progress
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue edit "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --remove-label "investigation" \
+            --add-label "claude-in-progress"
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "$(printf '🔍 調査エージェントが起動しました。ADR draft を作成します。\n\nGHA 実行ログ: %s' "$RUN_URL")"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # -----------------------------------------------------------------------
+      # Step 2: 次の ADR 番号を決定 (docs/adr/ 配下の最大番号 + 1)
+      # -----------------------------------------------------------------------
+      - name: Determine next ADR number
+        id: adr-number
+        run: |
+          set -euo pipefail
+          mkdir -p docs/adr
+          # nullglob: マッチなしの場合に glob を空配列にする (リテラル展開を避ける)
+          shopt -s nullglob
+          LAST=0
+          for f in docs/adr/ADR-*.md; do
+            base=$(basename "$f")
+            n=${base#ADR-}
+            n=${n%%-*}
+            n=${n%%.*}
+            # 数値以外はスキップ (ADR-000-template.md を含めて安全側に)
+            if [[ "$n" =~ ^[0-9]+$ ]] && [ "$n" -gt "$LAST" ]; then
+              LAST=$n
+            fi
+          done
+          shopt -u nullglob
+          NEXT=$(printf '%03d' $((LAST + 1)))
+          echo "number=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "次の ADR 番号: $NEXT"
+
+      # -----------------------------------------------------------------------
+      # Step 3: 調査エージェント起動
+      # コードベースを調査して ADR draft を作成し、PR を出す
+      # -----------------------------------------------------------------------
+      - name: Run Investigation Agent
+        id: investigate
+        uses: anthropics/claude-code-action@v1
+        env:
+          ISSUE_TITLE:   ${{ github.event.issue.title }}
+          ISSUE_BODY:    ${{ github.event.issue.body }}
+          ISSUE_NUMBER:  ${{ github.event.issue.number }}
+          ADR_NUMBER:    ${{ steps.adr-number.outputs.number }}
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            あなたはソフトウェアアーキテクチャの調査エージェントです。
+            以下の Issue について調査を行い、ADR draft を作成して PR を出してください。
+
+            ## Issue 情報
+            番号: ${{ env.ISSUE_NUMBER }}
+            タイトル: ${{ env.ISSUE_TITLE }}
+            内容:
+            ${{ env.ISSUE_BODY }}
+
+            ## 作業手順
+
+            ### 1. 事前調査
+            - CLAUDE.md を読んでプロジェクトのルールを把握する
+            - リポジトリの関連コードを Glob/Grep で調査する
+            - docs/adr/ の既存 ADR を読んで文脈を把握する (ADR 番号の重複を避ける)
+
+            ### 2. ADR draft の作成
+            以下のパスにファイルを作成する:
+            `docs/adr/ADR-${{ env.ADR_NUMBER }}-{kebab-case-title}.md`
+
+            フォーマットは `docs/adr/ADR-000-template.md` に厳密に従うこと。
+            (`symphony-decompose.yml` がパースするため、特に「実装チケットへの分解」
+            セクションのフォーマットは絶対に変更しないこと)
+
+            必須要素:
+            - `# ADR-${{ env.ADR_NUMBER }}: {タイトル}` の見出し
+            - `## ステータス` セクション (`Proposed` を記載)
+            - `## コンテキスト` セクションに `Closes #${{ env.ISSUE_NUMBER }}` を含める
+            - `## 調査した選択肢` セクションに 2 案以上を記述
+            - `## 決定` セクションは「(Approve 時にレビュアーが記入してください)」
+            - `## 実装チケットへの分解` セクション
+              - `- [ ] {タスクタイトル} <!-- Route A -->` 形式
+              - 人間対応が必要なら `<!-- Route C: {理由} -->` を末尾に
+            - `## 影響範囲` セクション
+
+            ### 3. PR の作成
+            - ブランチ名: `adr/issue-${{ env.ISSUE_NUMBER }}`
+            - PR タイトル: `ADR-${{ env.ADR_NUMBER }}: {タイトル}`
+            - PR 本文に `Closes #${{ env.ISSUE_NUMBER }}` を含める
+            - PR 本文に「**この PR を merge すると実装チケットが自動生成されます**」と明記
+            - 「実装チケットへの分解」セクションはレビュアーが編集可能であることを案内
+            - PR に `adr-draft` ラベルを付与する
+            - Issue のラベルを `claude-in-progress` から `adr-draft` に変更する
+
+          claude_args: |
+            --max-turns 30
+            --model claude-sonnet-4-6
+            --allowedTools "Read,Write,Edit,Bash,Glob,Grep,mcp__github__create_pull_request,mcp__github__create_branch,mcp__github__get_issue,mcp__github__add_issue_comment"
+          additional_permissions: "actions: read"
+
+      # -----------------------------------------------------------------------
+      # Step 4: 失敗時の処理
+      # -----------------------------------------------------------------------
+      - name: Handle investigation failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue edit "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --remove-label "claude-in-progress" \
+            --add-label "claude-failed" || true
+          gh issue comment "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "$(printf '⚠️ 調査エージェントの実行が失敗しました。\n\nGHA 実行ログ: %s\n\n手動で調査・ADR 作成を行ってください。' "$RUN_URL")"
