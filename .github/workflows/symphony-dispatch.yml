@@ -88,17 +88,19 @@ jobs:
             ${{ env.ISSUE_BODY }}
 
             ## 作業ルール
-            1. 作業前にまずリポジトリ全体のコードを調査・理解すること
-            2. テストが存在する場合は必ず実行し、パスを確認すること
-            3. ブランチ名は `claude/issue-${{ env.ISSUE_NUMBER }}` とすること
-            4. PR 作成時に Issue を close するリンクを含めること ("Closes #N")
-            5. 不明点があれば Issue にコメントして作業を停止すること (推測で進めない)
-            6. 完了後、この Issue に作業サマリ (変更内容・テスト結果) をコメントすること
+            1. **CLAUDE.md を必ず最初に読んでプロジェクトのルールを把握すること**
+            2. 実装前にリポジトリ全体の関連コードを Glob/Grep で調査・理解すること
+            3. docs/adr/ に既存の ADR があれば確認し、過去の決定と矛盾しないこと
+            4. テストが存在する場合は必ず実行し、パスを確認すること
+            5. ブランチ名は `claude/issue-${{ env.ISSUE_NUMBER }}` とすること
+            6. PR 作成時に "Closes #${{ env.ISSUE_NUMBER }}" を本文に含めること
+            7. 不明点があれば Issue にコメントして作業を停止すること (推測で進めない)
+            8. 完了後、この Issue に作業サマリ (変更内容・テスト結果) をコメントすること
 
           claude_args: |
             --max-turns 30
             --model claude-sonnet-4-6
-            --allowedTools "Edit,Read,Write,Bash,Glob,Grep,mcp__github__create_pull_request,mcp__github__create_branch,mcp__github__list_issues,mcp__github__get_issue"
+            --allowedTools "Edit,Read,Write,Bash,Glob,Grep,mcp__github__create_pull_request,mcp__github__create_branch,mcp__github__get_issue,mcp__github__add_issue_comment"
           additional_permissions: "actions: read"
 
       # -----------------------------------------------------------------------
