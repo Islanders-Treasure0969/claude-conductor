@@ -5,7 +5,7 @@
 
 ## [Unreleased]
 
-## [0.1.0] - TBD
+## [0.1.0] - 2026-05-08
 
 初版リリース。OpenAI Symphony 同等のエージェントオーケストレーションを
 Claude Code + GitHub Actions + GitHub Issues で再現する scaffolding を提供する。
