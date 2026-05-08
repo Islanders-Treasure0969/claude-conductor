@@ -45,3 +45,4 @@ jobs:
           claude_args: |
             --max-turns 20
             --model claude-sonnet-4-6
+            --allowedTools "Edit,Read,Write,Bash,Glob,Grep,mcp__github__add_issue_comment,mcp__github__create_pull_request,mcp__github__create_branch,mcp__github__get_issue,mcp__github__get_pull_request"

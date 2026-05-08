@@ -36,27 +36,45 @@ jobs:
           set -euo pipefail
           STALL_SECONDS=$((STALL_HOURS * 3600))
           NOW=$(date -u +%s)
+          STALLED_COUNT=0
+          CHECKED_COUNT=0
 
-          gh issue list \
-            --repo "$REPO" \
-            --label "claude-in-progress" \
-            --json number,updatedAt \
-            --limit 100 \
-          | jq -r '.[] | "\(.number) \(.updatedAt)"' \
-          | while read -r number updated_at; do
+          echo "停滞 Issue を検索中... (基準: ${STALL_HOURS} 時間以上 claude-in-progress)"
+
+          # process substitution でメインシェルにカウンタを反映
+          while IFS=$'\t' read -r number updated_at title; do
+              CHECKED_COUNT=$((CHECKED_COUNT + 1))
+
               # GNU date / BSD date 両対応
               updated_epoch=$(date -d "$updated_at" +%s 2>/dev/null || \
-                              date -j -f "%Y-%m-%dT%H:%M:%SZ" "$updated_at" +%s)
+                              date -j -f "%Y-%m-%dT%H:%M:%SZ" "$updated_at" +%s 2>/dev/null || true)
+
+              if [ -z "$updated_epoch" ]; then
+                echo "::warning::Issue #$number の日付パースに失敗しました ($updated_at)。スキップします。"
+                continue
+              fi
+
               elapsed=$((NOW - updated_epoch))
+              elapsed_hours=$((elapsed / 3600))
 
               if [ "$elapsed" -gt "$STALL_SECONDS" ]; then
-                echo "Issue #$number が ${STALL_HOURS} 時間以上停滞 → failed に遷移"
+                echo "停滞検知: Issue #$number (${elapsed_hours} 時間経過) - $title"
                 gh issue edit "$number" \
                   --repo "$REPO" \
                   --remove-label "claude-in-progress" \
                   --add-label "claude-failed"
                 gh issue comment "$number" \
                   --repo "$REPO" \
-                  --body "$(printf '⏰ タイムアウト: エージェントが %s 時間以上応答していません。\n\nGHA のログを確認してください。' "$STALL_HOURS")"
+                  --body "$(printf '⏰ タイムアウト: エージェントが %d 時間以上応答していません。\n\nGHA のログを確認し、必要であれば `claude-task` または `investigation` ラベルを再付与することで再実行できます。\n\n> symphony-cleanup.yml により自動検知されました。' "$elapsed_hours")"
+                STALLED_COUNT=$((STALLED_COUNT + 1))
+              else
+                echo "正常: Issue #$number (${elapsed_hours} 時間経過)"
               fi
-            done
+          done < <(gh issue list \
+            --repo "$REPO" \
+            --label "claude-in-progress" \
+            --json number,updatedAt,title \
+            --limit 100 \
+            | jq -r '.[] | "\(.number)\t\(.updatedAt)\t\(.title)"')
+
+          echo "クリーンアップ完了: ${CHECKED_COUNT} 件チェック / ${STALLED_COUNT} 件を failed に遷移"

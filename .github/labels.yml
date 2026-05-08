@@ -2,24 +2,61 @@
 # Symphony ステートマシン用ラベル定義
 # -----------------------------------------------------------------------------
 # 用途:
-#   このファイルは Symphony ワークフローが利用する 4 つのラベルを宣言する。
+#   このファイルは Symphony ワークフローが利用するラベルを宣言する。
 #   `scripts/setup-labels.sh` で一括作成・同期できる。
 #
+# ステートマシン全体像:
+#   [Triage]
+#     (Issue opened) → triage-pending → triage-A / triage-B / triage-C
+#
+#   [Route A: 実装パイプライン]
+#     claude-task → claude-in-progress → claude-review (成功)
+#                                      → claude-failed (失敗)
+#
+#   [Route B: 調査・設計パイプライン]
+#     investigation → claude-in-progress → adr-draft (PR 作成済み)
+#                                        → claude-failed (失敗)
+#     ADR merge 後 → 実装チケット自動生成 (Route A または Route C)
+#
+#   [Route C: 人間主体]
+#     triage-C のみ。エージェントは関与しない。
+#
 # 色は GitHub の慣例的なステータスカラーに準拠:
-#   claude-task         → 青  (キュー / new)
-#   claude-in-progress  → 黄  (進行中 / warn 寄り)
-#   claude-review       → 緑  (準備完了 / success 寄り)
-#   claude-failed       → 赤  (失敗 / danger)
+#   青系 (キュー), 黄系 (進行/中間), 緑 (success), 赤 (danger), 桃 (review)
 # =============================================================================
+
+# --- Triage ステート --------------------------------------------------------
+- name: triage-pending
+  color: "ededed"
+  description: "Triage エージェントが分類中"
+- name: triage-A
+  color: "0075ca"
+  description: "Triage 結果: 即実装可能 (Route A)"
+- name: triage-B
+  color: "e4e669"
+  description: "Triage 結果: 調査・設計先行 (Route B)"
+- name: triage-C
+  color: "d93f0b"
+  description: "Triage 結果: 人間主体で対応 (Route C)"
+
+# --- Route A: 実装パイプライン ----------------------------------------------
 - name: claude-task
   color: "1f77b4"
-  description: "作業キュー: Claude Code エージェントの起動を要求"
+  description: "実装キュー: 付与すると symphony-dispatch.yml が起動"
 - name: claude-in-progress
   color: "fbca04"
   description: "実行中: エージェントが作業中 (cleanup の対象)"
 - name: claude-review
   color: "2ea043"
-  description: "PR 作成済み・人間レビュー待ち"
+  description: "PR 作成済み・人間レビュー待ち (1 approve 必須)"
 - name: claude-failed
   color: "d73a4a"
   description: "失敗 / タイムアウト: 人間による介入が必要"
+
+# --- Route B: 調査・設計パイプライン ----------------------------------------
+- name: investigation
+  color: "e4e669"
+  description: "調査キュー: 付与すると symphony-investigate.yml が起動"
+- name: adr-draft
+  color: "f9d0c4"
+  description: "ADR draft PR 作成済み・人間レビュー待ち"
