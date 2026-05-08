@@ -44,7 +44,7 @@ jobs:
             --add-label "triage-pending"
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # -----------------------------------------------------------------------
       # Step 2: Triage エージェント実行

@@ -102,7 +102,7 @@ jobs:
       # Step 2: リポジトリのチェックアウト (フル履歴 = ブランチ作成のため)
       # -----------------------------------------------------------------------
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
