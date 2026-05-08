@@ -1,0 +1,28 @@
+# =============================================================================
+# Dependabot: GitHub Actions のバージョン追従
+# -----------------------------------------------------------------------------
+# 用途:
+#   .github/workflows/*.yml で利用している Action のバージョン更新を
+#   毎週月曜に自動チェックし、PR を作成する。
+#
+# 対象:
+#   actions/checkout, actions/setup-python, anthropics/claude-code-action など
+# =============================================================================
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+      include: scope
+    labels:
+      - "dependencies"
+    # major バージョンの更新は手動レビューが必要なので無視しない
+    # (security update は自動で PR が立つ)
