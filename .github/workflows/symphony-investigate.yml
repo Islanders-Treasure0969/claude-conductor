@@ -57,7 +57,7 @@ jobs:
             --body "$(printf '🔍 調査エージェントが起動しました。ADR draft を作成します。\n\nGHA 実行ログ: %s' "$RUN_URL")"
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
