@@ -15,10 +15,11 @@
 #   - ADR に "Closes #{Issue番号}" が含まれていること (親 Issue へのリンク)
 #
 # 注意:
-#   - github-actions ユーザーのコメント・コミットは後続 GHA をトリガーしない
-#     (GitHub の無限ループ防止仕様)。
-#     しかし issue create + label 付与は API 経由で別アクターになるため、
-#     claude-task ラベル付与で symphony-dispatch.yml が正常にトリガーされる。
+#   - GITHUB_TOKEN で起こした events (issues.opened / labeled 等) は
+#     後続 workflow を起動しない (GitHub の無限ループ防止仕様)。
+#     例外は workflow_dispatch / repository_dispatch のみ。
+#   - 従って Route A の子 Issue は claude-task ラベルではなく
+#     `gh workflow run symphony-dispatch.yml -F issue_number=N` で起動する。
 # =============================================================================
 name: Symphony Decompose
 
@@ -30,6 +31,7 @@ on:
 permissions:
   contents: read
   issues: write
+  actions: write   # symphony-dispatch.yml を workflow_dispatch で起動するため
 
 jobs:
   decompose:
@@ -139,13 +141,15 @@ jobs:
             ISSUE_NUMBER=$(echo "$ISSUE_URL" | grep -oE '[0-9]+$')
             echo "Issue #${ISSUE_NUMBER} を作成: $TITLE (Route $ROUTE)"
 
-            # Route A のみ claude-task ラベルを付与 (実装パイプラインへ投入)
+            # Route A: workflow_dispatch で symphony-dispatch.yml を明示起動
+            # (GITHUB_TOKEN の labeled イベントは後続 workflow をトリガーしないため)
             if [ "$ROUTE" = "A" ]; then
-              sleep 3  # ラベル付与の競合を避ける
-              gh issue edit "$ISSUE_NUMBER" \
+              sleep 2
+              gh workflow run symphony-dispatch.yml \
                 --repo "$REPO" \
-                --add-label "claude-task"
-              echo "  → claude-task ラベル付与 (symphony-dispatch.yml がトリガーされます)"
+                --ref main \
+                -F "issue_number=$ISSUE_NUMBER"
+              echo "  → symphony-dispatch.yml を workflow_dispatch で起動"
               ROUTE_A_COUNT=$((ROUTE_A_COUNT + 1))
             else
               echo "  → Route C: 人間対応キューに追加"
@@ -159,7 +163,7 @@ jobs:
 
           # 親 Issue にサマリコメントを投稿
           if [ -n "$PARENT_ISSUE" ]; then
-            SUMMARY=$(printf '✅ ADR-%s が承認されました。実装チケットを自動生成しました。\n\n- 🔧 Route A (エージェント実装): %d 件 (`claude-task` ラベル付与済み)\n- 👤 Route C (人間対応): %d 件 (`triage-C` ラベル付与済み)\n\n生成されたチケットは `triage-A` または `triage-C` ラベルで検索できます。' \
+            SUMMARY=$(printf '✅ ADR-%s が承認されました。実装チケットを自動生成しました。\n\n- 🔧 Route A (エージェント実装): %d 件 (`symphony-dispatch.yml` を workflow_dispatch で起動済み)\n- 👤 Route C (人間対応): %d 件 (`triage-C` ラベル付与済み)\n\n生成されたチケットは `triage-A` または `triage-C` ラベルで検索できます。' \
               "$ADR_NUMBER" "$ROUTE_A_COUNT" "$ROUTE_C_COUNT")
 
             gh issue comment "$PARENT_ISSUE" \

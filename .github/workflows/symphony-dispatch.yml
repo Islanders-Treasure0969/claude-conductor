@@ -2,8 +2,15 @@
 # Symphony Dispatch (核心ワークフロー)
 # -----------------------------------------------------------------------------
 # 用途:
-#   GitHub Issue に `claude-task` ラベルが付いたタイミングで Claude Code
-#   エージェントを自動起動し、Issue 駆動で実装〜PR 作成まで自走させる。
+#   GitHub Issue に `claude-task` ラベルが付いたタイミング、または
+#   `symphony-decompose.yml` から `gh workflow run` で呼び出されたタイミングで
+#   Claude Code エージェントを自動起動し、Issue 駆動で実装〜PR 作成まで自走させる。
+#
+# トリガー:
+#   1. issues.labeled (claude-task) — 人間 / 信頼アクターによるラベル付与
+#   2. workflow_dispatch (issue_number) — symphony-decompose.yml からの起動
+#      [GITHUB_TOKEN で起こした issues.labeled は後続 workflow を起動しないため、
+#       decompose は workflow_dispatch を介して dispatch を呼ぶ]
 #
 # ステートマシン:
 #   [claude-task] → [claude-in-progress] → [claude-review] / [claude-failed]
@@ -20,6 +27,12 @@ name: Symphony Dispatch
 on:
   issues:
     types: [labeled]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "実装対象の Issue 番号 (symphony-decompose.yml からの起動時に指定)"
+        required: true
+        type: string
 
 # 最小権限の原則
 permissions:
@@ -30,24 +43,56 @@ permissions:
 
 jobs:
   dispatch:
-    # claude-task ラベルが付いたときのみ起動 (他ラベルは無視)
-    if: github.event.label.name == 'claude-task'
+    # claude-task ラベルが付いたとき、または workflow_dispatch から呼ばれたときのみ起動
+    if: |
+      (github.event_name == 'issues' && github.event.label.name == 'claude-task') ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
     steps:
       # -----------------------------------------------------------------------
+      # Step 0: Issue 情報を解決 (両トリガー共通)
+      # workflow_dispatch から呼ばれた場合は inputs.issue_number、
+      # issues.labeled の場合は github.event.issue.* を使う。
+      # -----------------------------------------------------------------------
+      - name: Resolve issue context
+        id: issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ inputs.issue_number || github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ISSUE_NUMBER:-}" ]; then
+            echo "::error::issue_number が解決できません"
+            exit 1
+          fi
+          # Issue 詳細を取得 (title/body はマルチライン対応で GITHUB_OUTPUT へ)
+          json=$(gh issue view "$ISSUE_NUMBER" --repo "$REPO" --json number,title,body)
+          {
+            echo "number=$(jq -r .number <<<"$json")"
+            printf 'title<<ISSUE_TITLE_EOF\n%s\nISSUE_TITLE_EOF\n' "$(jq -r .title <<<"$json")"
+            printf 'body<<ISSUE_BODY_EOF\n%s\nISSUE_BODY_EOF\n' "$(jq -r .body <<<"$json")"
+          } >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------
       # Step 1: ラベルを in-progress に遷移し、開始コメントを投稿
+      # decompose 経由で来たケースでは triage-A も併せて剥がす。
       # -----------------------------------------------------------------------
       - name: Mark as in-progress
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_NUMBER: ${{ steps.issue.outputs.number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          gh issue edit "$ISSUE_NUMBER" \
-            --repo "$GITHUB_REPOSITORY" \
-            --remove-label "claude-task" \
+          set -euo pipefail
+          # claude-task / triage-A はあれば剥がす (どちらか / 両方付いている可能性)
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --remove-label "claude-task" 2>/dev/null || true
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --remove-label "triage-A" 2>/dev/null || true
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
             --add-label "claude-in-progress"
           gh issue comment "$ISSUE_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
@@ -72,9 +117,9 @@ jobs:
         id: claude
         uses: anthropics/claude-code-action@v1
         env:
-          ISSUE_TITLE: ${{ github.event.issue.title }}
-          ISSUE_BODY:  ${{ github.event.issue.body }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE:  ${{ steps.issue.outputs.title }}
+          ISSUE_BODY:   ${{ steps.issue.outputs.body }}
+          ISSUE_NUMBER: ${{ steps.issue.outputs.number }}
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
@@ -110,7 +155,7 @@ jobs:
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_NUMBER: ${{ steps.issue.outputs.number }}
         run: |
           gh issue edit "$ISSUE_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
@@ -124,13 +169,13 @@ jobs:
         if: failure()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_NUMBER: ${{ steps.issue.outputs.number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           gh issue edit "$ISSUE_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
             --remove-label "claude-in-progress" \
-            --add-label "claude-failed"
+            --add-label "claude-failed" 2>/dev/null || true
           gh issue comment "$ISSUE_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
             --body "$(printf '⚠️ エージェントの実行が失敗しました。\n\nGHA 実行ログ: %s\n\n人間による確認が必要です。' "$RUN_URL")"
