@@ -50,10 +50,21 @@ TEMPLATE_FILE_SRC="templates/CLAUDE.md"
 TEMPLATE_FILE_DST="CLAUDE.md"
 
 # --- ロギング ---------------------------------------------------------------
-log()  { printf '\033[1;34m▸\033[0m %s\n' "$*"; }
+# 全て stderr に出力する。stdout は download_archive() の返り値専用。
+log()  { printf '\033[1;34m▸\033[0m %s\n' "$*" >&2; }
 warn() { printf '\033[1;33m⚠\033[0m %s\n' "$*" >&2; }
 err()  { printf '\033[1;31m✗\033[0m %s\n' "$*" >&2; }
-ok()   { printf '\033[1;32m✓\033[0m %s\n' "$*"; }
+ok()   { printf '\033[1;32m✓\033[0m %s\n' "$*" >&2; }
+
+# --- 一時ディレクトリ管理 ---------------------------------------------------
+# trap を script-level に置くことで、関数 return 後も EXIT 時に確実に削除する。
+INSTALL_TMPDIR=""
+cleanup_tmpdir() {
+  if [ -n "${INSTALL_TMPDIR:-}" ] && [ -d "$INSTALL_TMPDIR" ]; then
+    rm -rf "$INSTALL_TMPDIR"
+  fi
+}
+trap cleanup_tmpdir EXIT
 
 # --- 前提チェック -----------------------------------------------------------
 check_prereqs() {
@@ -79,24 +90,24 @@ check_git_repo() {
 }
 
 # --- ダウンロード -----------------------------------------------------------
+# 標準出力には展開後のディレクトリパスのみを書く。ログは log() 経由 (stderr)。
 download_archive() {
   local archive_url="https://codeload.github.com/${SYMPHONY_REPO}/tar.gz/${SYMPHONY_REF}"
-  local tmpdir
-  tmpdir=$(mktemp -d)
-  trap 'rm -rf "$tmpdir"' EXIT
+
+  INSTALL_TMPDIR=$(mktemp -d)
 
   log "アーカイブを取得中: $archive_url"
-  if ! curl -fsSL "$archive_url" -o "$tmpdir/archive.tar.gz"; then
+  if ! curl -fsSL "$archive_url" -o "$INSTALL_TMPDIR/archive.tar.gz"; then
     err "アーカイブの取得に失敗しました。SYMPHONY_REPO / SYMPHONY_REF を確認してください。"
     exit 1
   fi
 
   log "アーカイブを展開中..."
-  tar -xzf "$tmpdir/archive.tar.gz" -C "$tmpdir"
+  tar -xzf "$INSTALL_TMPDIR/archive.tar.gz" -C "$INSTALL_TMPDIR"
 
   # 展開後のディレクトリ名 (例: claude-conductor-main) を特定
   local extracted
-  extracted=$(find "$tmpdir" -mindepth 1 -maxdepth 1 -type d | head -1)
+  extracted=$(find "$INSTALL_TMPDIR" -mindepth 1 -maxdepth 1 -type d | head -1)
   if [ -z "$extracted" ]; then
     err "アーカイブの展開に失敗しました。"
     exit 1
