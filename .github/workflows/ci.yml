@@ -36,6 +36,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+
       - name: Validate YAML syntax
         run: |
           set -euo pipefail
@@ -124,6 +127,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
 
       - name: Validate labels.yml shape
         run: |
