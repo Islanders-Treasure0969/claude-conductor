@@ -50,7 +50,7 @@ Issue opened
    │             [symphony-investigate.yml] → ADR draft PR 作成
    │             → 人間が ADR を編集・approve・merge
    │             [symphony-decompose.yml]  → 実装チケット自動生成
-   │             (Route A → claude-task 付与 → 実装パイプラインへ)
+   │             (Route A → symphony-dispatch.yml を workflow_dispatch で起動)
    │             (Route C → triage-C 付与 → 人間対応キューへ)
    │
    └─ triage-C → 人間がアサイン・対応 (エージェントは関与しない)
