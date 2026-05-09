@@ -59,7 +59,9 @@ Issue opened
 [symphony-cleanup.yml]     停滞 Issue を毎時クリーンアップ
 ```
 
-詳細は [DESIGN.md](DESIGN.md) を参照。
+詳細は以下を参照:
+- [DESIGN.md](DESIGN.md) — 設計詳細
+- [docs/ARCHITECTURE_REVIEW.md](docs/ARCHITECTURE_REVIEW.md) — 網羅的アーキテクチャ レビュー資料 (v0.2.1 時点の全体像、設計判断、セキュリティ、既知課題、レビューチェックリスト)
 
 ---
 
