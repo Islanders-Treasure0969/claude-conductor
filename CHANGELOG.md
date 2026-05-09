@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`symphony-dispatch.yml` が Claude の空振りを検出せず `claude-review` に遷移する
+  状態機械バグを修正** (#12)
+  - claude-code-action は内部エラー無しに 1 件もコミットせず終了することがある。
+    そのまま success 扱いで `Mark as review` step が走り、PR 不在で review 待ち
+    状態になっていた。
+  - 修正: `Run Claude Code Agent` の直後に `Verify Claude produced output` step を
+    追加し、`claude/issue-N` ブランチの commit 数と関連 PR の存在を確認。
+    どちらも無い場合は exit 1 して `Mark as failed (on failure)` パスへ流す。
+
 ## [0.1.3] - 2026-05-09
 
 ### Security
