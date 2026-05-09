@@ -163,6 +163,8 @@ jobs:
 
           # 親 Issue にサマリコメントを投稿
           if [ -n "$PARENT_ISSUE" ]; then
+            # shellcheck disable=SC2016
+            # 単一引用符内の `` は markdown の inline code 表記であり、コマンド置換ではない
             SUMMARY=$(printf '✅ ADR-%s が承認されました。実装チケットを自動生成しました。\n\n- 🔧 Route A (エージェント実装): %d 件 (`symphony-dispatch.yml` を workflow_dispatch で起動済み)\n- 👤 Route C (人間対応): %d 件 (`triage-C` ラベル付与済み)\n\n生成されたチケットは `triage-A` または `triage-C` ラベルで検索できます。' \
               "$ADR_NUMBER" "$ROUTE_A_COUNT" "$ROUTE_C_COUNT")
 
