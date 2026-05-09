@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **`actionlint` の SC2016 info 警告 4 件を解消** (#11)
+  - `symphony-cleanup.yml` / `symphony-decompose.yml` / `symphony-triage.yml` の
+    `printf` / `NEXT='...'` で使われている **markdown inline code 表記の
+    バックティック** を、shellcheck が「単一引用符内のシェル展開」と誤認していた
+    (false positive)。
+  - 対応: 該当箇所に `# shellcheck disable=SC2016` directive と意図説明コメントを
+    追加。markdown 表記である旨を後続の編集者にも明示。
+  - `actionlint .github/workflows/*.yml` の出力が完全に clean に。
+
 ### Added
 
 - **CodeRabbit AI レビュー設定** (`.coderabbit.yaml`)

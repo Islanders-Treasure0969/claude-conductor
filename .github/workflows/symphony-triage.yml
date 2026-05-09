@@ -153,6 +153,9 @@ jobs:
             echo "::warning::triage agent did not produce a valid $RESULT_FILE"
           fi
 
+          # shellcheck disable=SC2016
+          # 以下 case 内の NEXT='`...`' は markdown inline code 表記。
+          # コマンド置換ではないので展開されない方が正しい。
           case "$ROUTE" in
             A)
               LABEL="triage-A"

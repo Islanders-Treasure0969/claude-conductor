@@ -63,6 +63,9 @@ jobs:
                   --repo "$REPO" \
                   --remove-label "claude-in-progress" \
                   --add-label "claude-failed"
+                # shellcheck disable=SC2016
+                # 単一引用符内の `` は markdown の inline code 表記であり、シェルの
+                # コマンド置換ではない (printf の format 文字列なので展開されない方が正)
                 gh issue comment "$number" \
                   --repo "$REPO" \
                   --body "$(printf '⏰ タイムアウト: エージェントが %d 時間以上応答していません。\n\nGHA のログを確認し、必要であれば `claude-task` または `investigation` ラベルを再付与することで再実行できます。\n\n> symphony-cleanup.yml により自動検知されました。' "$elapsed_hours")"
