@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Claude 起動 workflow の execution log を artifact として保存** (#13)
+  - 対象: `symphony-triage.yml` / `symphony-dispatch.yml` / `symphony-investigate.yml`
+  - 各 workflow 末尾に `actions/upload-artifact@v4` step を追加。Claude が実行中に
+    生成した `/home/runner/work/_temp/claude-execution-output.json` を 30 日保存。
+  - 名前形式: `claude-execution-log-{triage|dispatch|investigate}-{run_id}`
+  - `if: always()` により workflow 失敗時も保存される。`gh run download <run-id>`
+    で取得して空振り原因や permission_denials の詳細を後追い可能。
+  - `if-no-files-found: ignore` 指定で、claude-code-action 起動前の失敗時
+    (e.g. checkout 失敗) は upload エラーにせず無視する。
+
 ### Fixed
 
 - **`symphony-dispatch.yml` が Claude の空振りを検出せず `claude-review` に遷移する
