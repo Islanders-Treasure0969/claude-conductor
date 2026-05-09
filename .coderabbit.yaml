@@ -1,0 +1,57 @@
+# =============================================================================
+# CodeRabbit configuration
+# -----------------------------------------------------------------------------
+# Docs: https://docs.coderabbit.ai/configuration
+#
+# 方針:
+#   - 日本語レビュー (開発者言語に合わせる)
+#   - profile: chill (assertive より穏やか / Symphony 自動 PR で煩くない)
+#   - 自動レビューは main 向け PR のみ、draft はスキップ
+#   - CHANGELOG.md / LICENSE / lockfile 等のノイズになりやすいファイルは除外
+# =============================================================================
+
+language: ja-JP
+
+reviews:
+  # 'chill' (穏やか) または 'assertive' (積極的)
+  profile: chill
+
+  # CodeRabbit が "Request changes" ワークフローを使うか
+  # false: コメントのみ。PR の merge 可否には影響しない
+  request_changes_workflow: false
+
+  # PR の冒頭に高レベル要約を投稿する
+  high_level_summary: true
+
+  # ふざけた poem 出力 (デフォルト on)
+  poem: false
+
+  # walkthrough セクションを折り畳むか
+  collapse_walkthrough: false
+
+  # PR ステータスコメント (review 完了通知)
+  review_status: true
+
+  auto_review:
+    # PR 作成時に自動レビュー
+    enabled: true
+    # draft PR はレビューしない (まだ書きかけの想定)
+    drafts: false
+    # main 向けの PR のみ対象
+    base_branches:
+      - main
+
+  # レビュー対象から除外するパス (gitignore 互換、'!' プレフィックスで除外)
+  path_filters:
+    - "!CHANGELOG.md"
+    - "!LICENSE"
+    - "!.gitignore"
+    # ADR は人間が議論する性質のドキュメントなので、AI レビュー対象外
+    - "!docs/adr/**"
+
+chat:
+  # @coderabbitai メンションへの自動返答を有効化
+  auto_reply: true
+
+# early access (preview) 機能はデフォルト無効
+early_access: false

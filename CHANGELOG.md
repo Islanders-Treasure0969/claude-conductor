@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- **CodeRabbit AI レビュー設定** (`.coderabbit.yaml`)
+  - 日本語レビュー (`language: ja-JP`)、profile: chill (穏やか)
+  - main 向け PR のみ自動レビュー、draft PR は対象外
+  - 除外パス: `CHANGELOG.md` / `LICENSE` / `.gitignore` / `docs/adr/**`
+  - GitHub App は別途 https://github.com/apps/coderabbitai から install 必要
+  - Symphony Dispatch が PR 作成 → CodeRabbit が自動レビュー → 人間 merge、の
+    二段レビュー体制が組める
+
 ## [0.2.0] - 2026-05-09
 
 ### Added
