@@ -213,9 +213,12 @@ jobs:
             echo "::warning::PR not found on branch $BRANCH; skipping CodeRabbit trigger."
             exit 0
           fi
+          # 改行を含む本文は printf で実改行を生成 (CLAUDE.md の workflow 規約)。
+          # 現状は単一行だが、将来の拡張で安全な形を維持する。
+          BODY=$(printf '%s\n' '@coderabbitai review')
           gh pr comment "$PR_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
-            --body "@coderabbitai review"
+            --body "$BODY"
           echo "::notice::Triggered CodeRabbit review on PR #${PR_NUMBER}"
 
       # -----------------------------------------------------------------------
