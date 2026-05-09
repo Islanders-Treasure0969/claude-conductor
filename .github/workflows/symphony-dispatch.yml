@@ -219,3 +219,17 @@ jobs:
           gh issue comment "$ISSUE_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
             --body "$(printf '⚠️ エージェントの実行が失敗しました。\n\nGHA 実行ログ: %s\n\n人間による確認が必要です。' "$RUN_URL")"
+
+      # -----------------------------------------------------------------------
+      # Step 7: Claude execution log の artifact upload (常時実行)
+      # 失敗・成功問わず Claude 内部のターン詳細・拒否事由を保管。
+      # 30 日間保持し `gh run download` で取得可能。
+      # -----------------------------------------------------------------------
+      - name: Upload Claude execution log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-execution-log-dispatch-${{ github.run_id }}
+          path: /home/runner/work/_temp/claude-execution-output.json
+          retention-days: 30
+          if-no-files-found: ignore

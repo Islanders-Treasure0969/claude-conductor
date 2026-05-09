@@ -169,3 +169,16 @@ jobs:
           gh issue comment "$ISSUE_NUMBER" \
             --repo "$GITHUB_REPOSITORY" \
             --body "$(printf '⚠️ 調査エージェントの実行が失敗しました。\n\nGHA 実行ログ: %s\n\n手動で調査・ADR 作成を行ってください。' "$RUN_URL")"
+
+      # -----------------------------------------------------------------------
+      # Claude execution log の artifact upload (常時実行)
+      # 失敗・成功問わず Claude 内部のターン詳細・拒否事由を保管。
+      # -----------------------------------------------------------------------
+      - name: Upload Claude execution log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-execution-log-investigate-${{ github.run_id }}
+          path: /home/runner/work/_temp/claude-execution-output.json
+          retention-days: 30
+          if-no-files-found: ignore
