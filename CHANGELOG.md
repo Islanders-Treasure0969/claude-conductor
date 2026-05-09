@@ -5,7 +5,33 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`symphony-dispatch.yml` に `@coderabbitai review` 自動コメント step を追加**
+  (ADR-001 / #26 / #24)
+  - claude-code-action が作成する PR は author が `app/claude` (bot) で、CodeRabbit が
+    default で auto-review しない問題への対処。
+  - `Verify Claude produced output` step 直後に新規 step `Trigger CodeRabbit review on PR`
+    を追加。`gh pr list --head` で PR を取得して `@coderabbitai review` メンションを
+    投稿することで CodeRabbit のレビューを手動トリガー。
+  - CodeRabbit を入れていない repo では無視されるため実害なし。
+  - ADR-001 の「採用理由」に詳細記載。
+
 ### Fixed
+
+- **`symphony-dispatch.yml` の Decompose → Dispatch chain が `claude-code-action` の
+  bot ガードで拒否される問題を修正** (#26, ADR-001 派生)
+  - `claude-code-action@v1` は `Workflow initiated by non-human actor: github-actions
+    (type: Bot). Add bot to allowed_bots list or use '*' to allow all bots.` で workflow
+    起動を拒否する built-in safeguard を持つ。
+  - Symphony の Decompose は ADR merge 時に **`workflow_dispatch` 経由で Dispatch を
+    chain 起動**するため、trigger actor が `github-actions[bot]` になり Dispatch が常に
+    失敗していた (self-healing flow が成立しない)。
+  - 修正: `symphony-dispatch.yml` の `claude-code-action` 呼び出しに
+    `allowed_bots: "github-actions"` を追加。これは Symphony 内部 chain trigger だけを
+    許可する最小限の設定で、外部からの bot trigger は依然として拒否される。
+  - 検出経路: ADR-001 のチケット自動分解で生成された Issue #26 上で実機 Dispatch を
+    走らせた際の failure ログから判明。
 
 - **`actionlint` の SC2016 info 警告 4 件を解消** (#11)
   - `symphony-cleanup.yml` / `symphony-decompose.yml` / `symphony-triage.yml` の
