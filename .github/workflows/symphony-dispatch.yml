@@ -149,7 +149,47 @@ jobs:
           additional_permissions: "actions: read"
 
       # -----------------------------------------------------------------------
-      # Step 4: 成功時 → review ラベルへ遷移
+      # Step 4: Claude の成果物を検証
+      # claude-code-action は内部エラーが無くても commit を一切作らずに
+      # success で終わることがあるため、ブランチに main を超える commit が
+      # 存在するか、または該当ブランチから PR が立っているかを必ず確認する。
+      # どちらも無い場合は exit 1 して、Step 6 (Mark as failed) に流す。
+      # -----------------------------------------------------------------------
+      - name: Verify Claude produced output
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ steps.issue.outputs.number }}
+        run: |
+          set -euo pipefail
+          BRANCH="claude/issue-${ISSUE_NUMBER}"
+
+          git fetch origin main "$BRANCH" 2>/dev/null || true
+
+          HAS_COMMITS=0
+          if git rev-parse --verify "origin/$BRANCH" >/dev/null 2>&1; then
+            AHEAD=$(git rev-list --count "origin/main..origin/$BRANCH")
+            if [ "$AHEAD" -gt 0 ]; then
+              HAS_COMMITS=1
+              echo "✓ Branch $BRANCH is ahead of main by $AHEAD commit(s)"
+            fi
+          fi
+
+          HAS_PR=0
+          PR_COUNT=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --json number --jq 'length')
+          if [ "$PR_COUNT" -gt 0 ]; then
+            HAS_PR=1
+            echo "✓ Found $PR_COUNT PR(s) from branch $BRANCH"
+          fi
+
+          if [ "$HAS_COMMITS" -eq 0 ] && [ "$HAS_PR" -eq 0 ]; then
+            echo "::error::Claude did not produce any commits or pull request on $BRANCH. Marking as failed."
+            exit 1
+          fi
+          echo "Verification passed (commits=$HAS_COMMITS, PR=$HAS_PR)"
+
+      # -----------------------------------------------------------------------
+      # Step 5: 成功時 → review ラベルへ遷移
       # -----------------------------------------------------------------------
       - name: Mark as review (on success)
         if: success()
@@ -163,7 +203,7 @@ jobs:
             --add-label "claude-review"
 
       # -----------------------------------------------------------------------
-      # Step 5: 失敗時 → failed ラベルへ遷移し、人間にエスカレーション
+      # Step 6: 失敗時 → failed ラベルへ遷移し、人間にエスカレーション
       # -----------------------------------------------------------------------
       - name: Mark as failed (on failure)
         if: failure()
