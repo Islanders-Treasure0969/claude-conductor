@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### Security
+
+- **`symphony-triage.yml` / `symphony-interactive.yml` に `author_association` ガードを
+  追加** (#14)
+  - public repo + GitHub Template + Anthropic API key 利用 という構成における外部
+    ユーザーからの **cost griefing** 対策。
+  - 対象: `triage` job と `claude-respond` job。`OWNER` / `MEMBER` / `COLLABORATOR` の
+    author のみ workflow 起動を許可。それ以外のユーザーが立てた issue や書いた
+    `@claude` メンションコメントは無視される。
+  - 副作用: 外部ユーザーからの issue は自動 triage されず、ラベル付与は repo
+    オーナー側で手動運用となる。導入先がチーム開発で外部 contributor を
+    許容したい場合は `if:` 条件を緩めて再 install すること。
+
 ## [0.1.2] - 2026-05-08
 
 ### Fixed

@@ -30,6 +30,14 @@ jobs:
   triage:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # 外部ユーザーからの cost griefing 防止: write 権限相当のユーザーが立てた
+    # issue のみ Triage 対象とする。導入先のリポ運用に応じて条件を緩める場合は
+    # ここを編集する (例: 'CONTRIBUTOR' を含めてリポへのコントリビューション
+    # 経験のあるユーザーまで許容する等)。
+    if: >-
+      github.event.issue.author_association == 'OWNER' ||
+      github.event.issue.author_association == 'MEMBER' ||
+      github.event.issue.author_association == 'COLLABORATOR'
 
     steps:
       # -----------------------------------------------------------------------

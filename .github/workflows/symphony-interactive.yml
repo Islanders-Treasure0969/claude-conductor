@@ -30,6 +30,13 @@ jobs:
   claude-respond:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # 外部ユーザーからの cost griefing 防止: write 権限相当のユーザーが書いた
+    # コメントのみ @claude メンション応答対象とする。issue_comment と
+    # pull_request_review_comment の両方で comment.author_association を見る。
+    if: >-
+      github.event.comment.author_association == 'OWNER' ||
+      github.event.comment.author_association == 'MEMBER' ||
+      github.event.comment.author_association == 'COLLABORATOR'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
