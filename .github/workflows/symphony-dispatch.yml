@@ -197,10 +197,13 @@ jobs:
       # ADR-001 (#24): claude-code-action が作る PR は author=app/claude (bot) で、
       # CodeRabbit は default で bot author を auto-review しない。
       # PR 上に @coderabbitai review コメントを投稿して手動トリガーする。
-      # CodeRabbit を入れていない repo では無視されるため実害なし。
+      #
+      # 【scaffold 純粋性】このステップは導入先で `.coderabbit.yaml` が存在する場合
+      # にのみ発火する (条件付き opt-in)。CodeRabbit を使っていない repo では
+      # コメントノイズを出さないために hashFiles で存在チェックを行う。
       # -----------------------------------------------------------------------
       - name: Trigger CodeRabbit review on PR
-        if: success()
+        if: success() && (hashFiles('.coderabbit.yaml') != '' || hashFiles('.coderabbit.yml') != '')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ steps.issue.outputs.number }}

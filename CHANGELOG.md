@@ -5,6 +5,22 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **`symphony-dispatch.yml` の `Trigger CodeRabbit review on PR` step を
+  条件付き発火に変更** (scaffold 純粋性向上)
+  - 導入先で `.coderabbit.yaml` / `.coderabbit.yml` が存在しない場合は step を
+    skip するよう、`if:` 条件に `hashFiles()` チェックを追加。
+  - 効果: CodeRabbit を採用していない repo に scaffold を導入した場合、PR に
+    `@coderabbitai review` という宙ぶらりんなコメントが残らなくなる。
+  - 設計思想: scaffold は「Issue → Triage → 3-route 処理」だけにフォーカスし、
+    特定の SaaS / 外部サービスへの opt-in は導入先 repo の判断に委ねる。
+- **README: install.sh 使用例を `v0.1.0` → `v0.2.1` に更新**
+  - v0.1.0 には install.sh のバグがあるため (v0.1.1 で修正済) 推奨しない旨も追記。
+- **README: Branch Protection の `Require approvals` に solo dev 向け注釈を追加**
+  - 個人 dev で同一アカウントから PR を作るケースでは self-approval ブロックで
+    詰むため `0` 推奨であることを 1 行で補足。チーム開発は従来通り 1 以上を維持。
+
 ## [0.2.1] - 2026-05-10
 
 ### Added
