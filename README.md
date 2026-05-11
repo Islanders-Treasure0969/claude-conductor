@@ -103,7 +103,8 @@ SYMPHONY_REF=v0.2.1 SYMPHONY_FORCE=1 \
 ```
 
 > **Note**: `v0.1.0` には install.sh のバグがあるため `v0.1.1` 以上を指定してください
-> ([CHANGELOG](CHANGELOG.md) の v0.1.1 を参照)。最新の安定版は `v0.2.1` です。
+> ([CHANGELOG](CHANGELOG.md) の v0.1.1 を参照)。安定版は [Releases](../../releases)
+> ページから最新を確認してください。
 
 ---
 

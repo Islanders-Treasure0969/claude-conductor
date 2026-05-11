@@ -198,9 +198,10 @@ jobs:
       # CodeRabbit は default で bot author を auto-review しない。
       # PR 上に @coderabbitai review コメントを投稿して手動トリガーする。
       #
-      # 【scaffold 純粋性】このステップは導入先で `.coderabbit.yaml` が存在する場合
-      # にのみ発火する (条件付き opt-in)。CodeRabbit を使っていない repo では
-      # コメントノイズを出さないために hashFiles で存在チェックを行う。
+      # 【scaffold 純粋性】このステップは導入先で `.coderabbit.yaml` または
+      # `.coderabbit.yml` が存在する場合にのみ発火する (条件付き opt-in)。
+      # CodeRabbit を使っていない repo ではコメントノイズを出さないために
+      # hashFiles で両方の拡張子を存在チェックする。
       # -----------------------------------------------------------------------
       - name: Trigger CodeRabbit review on PR
         if: success() && (hashFiles('.coderabbit.yaml') != '' || hashFiles('.coderabbit.yml') != '')
