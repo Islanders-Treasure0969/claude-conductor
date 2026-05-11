@@ -98,9 +98,13 @@ curl -fsSL https://raw.githubusercontent.com/Islanders-Treasure0969/claude-condu
 例: 特定タグから取得・既存ファイルを上書き:
 
 ```bash
-SYMPHONY_REF=v0.1.0 SYMPHONY_FORCE=1 \
+SYMPHONY_REF=v0.2.1 SYMPHONY_FORCE=1 \
   bash <(curl -fsSL https://raw.githubusercontent.com/Islanders-Treasure0969/claude-conductor/main/install.sh)
 ```
+
+> **Note**: `v0.1.0` には install.sh のバグがあるため `v0.1.1` 以上を指定してください
+> ([CHANGELOG](CHANGELOG.md) の v0.1.1 を参照)。安定版は [Releases](../../releases)
+> ページから最新を確認してください。
 
 ---
 
@@ -145,6 +149,11 @@ gh auth login
 - Require a pull request before merging
 - **Require approvals: 1** (エージェント PR も含めて全 PR に 1 approve 必須)
 - Require status checks to pass before merging
+
+> **Note (個人開発の場合)**: 同一アカウントから PR を作る solo dev では GitHub の
+> self-approval ブロックで詰むため、`Require approvals: 0` を推奨します
+> (Symphony の「人間ゲート」は label 昇格と手動 merge の 2 アクションで実質的に
+> 維持されます)。チーム開発では 1 以上を維持してください。
 
 ### 動作確認
 
